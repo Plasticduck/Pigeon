@@ -26,7 +26,7 @@ export async function POST(req: Request) {
 
   const raw = msg.content[0].type === "text" ? msg.content[0].text.trim() : "[]";
   try {
-    const match = raw.match(/\[.*\]/s);
+    const match = raw.match(/\[[\s\S]*\]/);
     const labels: string[] = match ? JSON.parse(match[0]) : [];
     return Response.json({ labels });
   } catch {
