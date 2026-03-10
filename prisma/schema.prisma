@@ -3,7 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
+  url       = env("NETLIFY_DATABASE_URL")
+  directUrl = env("NETLIFY_DATABASE_URL_UNPOOLED")
 }
 
 model Account {

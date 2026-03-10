@@ -5,6 +5,16 @@ import { mockEmails } from "@/lib/mockData";
 
 export default function DashboardPage() {
   const [selectedEmailId, setSelectedEmailId] = useState<string>(mockEmails[0].id);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredEmails = mockEmails.filter((email) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      email.senderName.toLowerCase().includes(q) ||
+      email.subject.toLowerCase().includes(q) ||
+      email.preview.toLowerCase().includes(q)
+    );
+  });
 
   const selectedEmail = mockEmails.find(e => e.id === selectedEmailId) || mockEmails[0];
 
@@ -51,6 +61,18 @@ export default function DashboardPage() {
       <section className="list-pane">
         <div className="list-header">
           <div className="list-title">Good Morning, Johnathan</div>
+          <div className="search-bar-wrapper">
+            <svg className="search-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M13 13L17 17M8.5 15C5.46243 15 3 12.5376 3 9.5C3 6.46243 5.46243 4 8.5 4C11.5376 4 14 6.46243 14 9.5C14 12.5376 11.5376 15 8.5 15Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            <input
+              className="search-bar"
+              type="text"
+              placeholder="Search emails..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
           <div className="list-filters">
             <span className="filter-item active">All Mails</span>
             <span className="filter-item">Unread (125)</span>
@@ -59,26 +81,32 @@ export default function DashboardPage() {
         </div>
 
         <div className="emails-container">
-          {mockEmails.map((email) => (
-            <div 
-              key={email.id} 
-              className={`email-card ${selectedEmailId === email.id ? 'selected' : ''}`}
-              onClick={() => setSelectedEmailId(email.id)}
-            >
-              <div className="email-sender">
-                <span>{email.senderName}</span>
-                <span className="email-date">{email.date}</span>
+          {filteredEmails.length === 0 ? (
+            <div className="search-empty">No emails match your search.</div>
+          ) : (
+            filteredEmails.map((email) => (
+              <div
+                key={email.id}
+                className={`email-card ${selectedEmailId === email.id ? "selected" : ""}`}
+                onClick={() => setSelectedEmailId(email.id)}
+              >
+                <div className="email-sender">
+                  <span>{email.senderName}</span>
+                  <span className="email-date">{email.date}</span>
+                </div>
+                <div className="email-subject">{email.subject}</div>
+                <div className="email-preview">{email.preview}</div>
+                <div className="email-meta">
+                  <span className="email-tag">{email.label}</span>
+                  {email.attachments.length > 0 && (
+                    <span className="email-tag">
+                      {email.attachments.length} attachment{email.attachments.length > 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="email-subject">{email.subject}</div>
-              <div className="email-preview">{email.preview}</div>
-              <div className="email-meta">
-                <span className="email-tag">{email.label}</span>
-                {email.attachments.length > 0 && (
-                  <span className="email-tag">📎 {email.attachments.length}</span>
-                )}
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </section>
 
@@ -86,16 +114,16 @@ export default function DashboardPage() {
       <section className="detail-pane">
         <div className="detail-header">
           <div className="detail-actions">
-            <button>← Back</button>
-            <button>🗑️ Delete</button>
+            <button>Back</button>
+            <button>Delete</button>
             <button>Archive</button>
           </div>
-          <div>All Categories ⌄</div>
+          <div>All Categories</div>
         </div>
 
         <div className="detail-content">
           <h2 className="detail-subject">{selectedEmail.subject}</h2>
-          
+
           <div className="detail-sender-info">
             <div className="profile-avatar"></div>
             <div className="detail-sender-text">
@@ -107,7 +135,7 @@ export default function DashboardPage() {
 
           {selectedEmail.aiSummary && (
             <div className="ai-summary">
-              <div className="ai-icon">✨</div>
+              <div className="ai-label">AI Summary</div>
               <div className="ai-text">{selectedEmail.aiSummary}</div>
             </div>
           )}
@@ -118,11 +146,11 @@ export default function DashboardPage() {
 
           {selectedEmail.attachments.length > 0 && (
             <div className="attachments-section">
-              <div className="attachments-title">Attachments Securely Scanned</div>
+              <div className="attachments-title">Attachments — Securely Scanned</div>
               <div className="attachments-grid">
                 {selectedEmail.attachments.map((att, idx) => (
                   <div key={idx} className="attachment-card">
-                    <div className="attachment-name">📄 {att.name}</div>
+                    <div className="attachment-name">{att.name}</div>
                     <div className="attachment-meta">
                       <span>{att.size}</span>
                       <span className="attachment-download">Download</span>
