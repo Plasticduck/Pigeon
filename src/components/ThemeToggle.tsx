@@ -4,14 +4,18 @@ import { useState, useEffect } from "react";
 
 export function ThemeToggle() {
   const [dark, setDark] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const saved = localStorage.getItem("theme");
     if (saved === "dark") {
       document.documentElement.setAttribute("data-theme", "dark");
       setDark(true);
     }
   }, []);
+
+  if (!mounted) return <button className="sidebar-icon" aria-hidden style={{ opacity: 0 }} />;
 
   function toggle() {
     const next = !dark;

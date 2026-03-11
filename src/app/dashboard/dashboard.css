@@ -1033,31 +1033,71 @@
 
 [data-theme='dark'] .ai-summary-text { color: #c4b5fd; }
 
-/* Full Screen Mode */
-.fullscreen-mode {
-  grid-template-columns: 1fr !important;
-}
-
+/* Full Screen Mode — fixed overlay starting after sidebar */
 .detail-fullscreen {
-  border-left: none;
+  position: fixed !important;
+  left: 64px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  background: var(--bg-panel);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .detail-fullscreen .detail-content {
-  max-width: 900px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 1.5rem 2.5rem 1rem;
+  width: 100%;
 }
 
 .detail-fullscreen .reply-box {
-  max-width: 900px;
+  max-width: 860px;
   margin: 0 auto 1.125rem;
-  width: calc(100% - 5rem);
+  width: calc(100% - 4rem);
 }
 
 .detail-fullscreen .ai-summary-block {
-  max-width: 900px;
-  margin: 0 auto;
-  width: calc(100% - 5rem);
+  max-width: 860px;
+  margin: 0.75rem auto 0;
+  width: calc(100% - 4rem);
+}
+
+/* Priority Inbox */
+.priority-section-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #b45309;
+}
+
+[data-theme='dark'] .priority-section-header { color: #fbbf24; }
+
+.emails-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 4px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.emails-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
 /* Reply attachments */

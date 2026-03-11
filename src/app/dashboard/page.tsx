@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { useSession } from "next-auth/react";
 
 /* ── Types ─────────────────────────────────────────── */
@@ -91,26 +91,27 @@ const PERSONAL_DOMAINS = new Set([
 ]);
 
 /**
- * Avatar priority: Google favicon (business) > Gravatar > initials
- * Google S2 favicons work reliably for any domain.
+ * Avatar priority: Clearbit logo (business) > Gravatar > colored initials
+ * Clearbit properly returns 404 when no logo exists, so onError fires correctly.
+ * Personal email domains skip Clearbit and go straight to Gravatar.
  */
 function SenderAvatar({ name, email, className, style }: {
   name: string; email: string; className?: string; style?: React.CSSProperties;
 }) {
-  const [stage, setStage] = useState<"favicon"|"gravatar"|"initials">("favicon");
+  const [stage, setStage] = useState<"logo"|"gravatar"|"initials">("logo");
   const domain = email.split("@")[1] ?? "";
   const isPersonal = PERSONAL_DOMAINS.has(domain);
+  const logoUrl = `https://logo.clearbit.com/${domain}`;
   const gravatarUrl = `https://www.gravatar.com/avatar/${md5Hex(email)}?s=68&d=404`;
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
-  const effectiveStage = isPersonal ? (stage === "favicon" ? "gravatar" : stage) : stage;
+  const effectiveStage = isPersonal ? (stage === "logo" ? "gravatar" : stage) : stage;
 
-  if (effectiveStage === "favicon") {
+  if (effectiveStage === "logo") {
     return (
       <img
-        src={faviconUrl}
+        src={logoUrl}
         alt={name}
         className={className ?? "email-avatar"}
-        style={{ objectFit: "cover", borderRadius: "50%", ...(style ?? {}) }}
+        style={{ objectFit: "contain", padding: "5px", background: "#fff", borderRadius: "50%", ...(style ?? {}) }}
         onError={() => setStage("gravatar")}
       />
     );
@@ -247,7 +248,11 @@ function ComposeModal({ from, onClose, onSent }: { from: string; onClose: () => 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to, subject, body, attachments: files.length > 0 ? files : undefined }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error?.error?.message ?? "Send failed"); }
+      if (!res.ok) {
+        let msg = "Send failed";
+        try { const d = await res.json(); msg = d.error?.error?.message ?? d.error ?? msg; } catch {}
+        throw new Error(msg);
+      }
       onSent();
       onClose();
     } catch (e: unknown) {
@@ -514,6 +519,7 @@ export default function DashboardPage() {
             <div className="nav-list">
               {MAIL_LABELS.map(item => (
                 <button key={item.id}
+                  data-label={item.id}
                   className={"nav-item" + (activeLabel === item.id && !search ? " active" : "")}
                   onClick={() => { setActiveLabel(item.id); setSearch(""); setSelectedId(null); setDetail(null); }}>
                   {item.label}
@@ -555,31 +561,51 @@ export default function DashboardPage() {
               <div className="state-msg">Loading...</div>
             ) : emails.length === 0 ? (
               <div className="state-msg">No emails found.</div>
-            ) : (
-              <>
-                {emails.map(email => (
-                  <div key={email.id}
-                    className={"email-card" + (selectedId === email.id ? " selected" : "") + (email.isUnread ? " unread" : "")}
-                    onClick={() => setSelectedId(email.id)}>
-                    <SenderAvatar name={email.senderName} email={email.senderEmail} />
-                    <div className="email-card-body">
-                      <div className="email-row-top">
-                        <span className="sender-name">{email.senderName}</span>
-                        <span className="email-date">{email.date}</span>
-                      </div>
-                      <div className="email-subject">{email.subject}</div>
-                      <div className="email-preview">{email.snippet}</div>
+            ) : (() => {
+              const showPriority = activeLabel === "INBOX" && !search;
+              const priorityEmails = showPriority ? emails.filter(e => e.isUnread).slice(0, 5) : [];
+              const priorityIds = new Set(priorityEmails.map(e => e.id));
+              const hasPriority = priorityEmails.length > 0;
+              return (
+                <>
+                  {hasPriority && (
+                    <div className="priority-section-header">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M5 1l.9 2.7H9L6.5 5.4l.9 2.7L5 6.4l-2.4 1.7.9-2.7L1 3.7h3.1L5 1z"/></svg>
+                      Priority
                     </div>
-                    {email.isUnread && <div className="unread-dot" />}
-                  </div>
-                ))}
-                {nextPageToken && (
-                  <button className="load-more-btn" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore ? "Loading..." : "Load older emails"}
-                  </button>
-                )}
-              </>
-            )}
+                  )}
+                  {emails.map((email, idx) => {
+                    const isPriority = priorityIds.has(email.id);
+                    const isFirstOther = hasPriority && !isPriority &&
+                      emails.findIndex(e => !priorityIds.has(e.id)) === idx;
+                    return (
+                      <Fragment key={email.id}>
+                        {isFirstOther && <div className="emails-divider">All Mail</div>}
+                        <div
+                          className={"email-card" + (selectedId === email.id ? " selected" : "") + (email.isUnread ? " unread" : "")}
+                          onClick={() => setSelectedId(email.id)}>
+                          <SenderAvatar name={email.senderName} email={email.senderEmail} />
+                          <div className="email-card-body">
+                            <div className="email-row-top">
+                              <span className="sender-name">{email.senderName}</span>
+                              <span className="email-date">{email.date}</span>
+                            </div>
+                            <div className="email-subject">{email.subject}</div>
+                            <div className="email-preview">{email.snippet}</div>
+                          </div>
+                          {email.isUnread && <div className="unread-dot" />}
+                        </div>
+                      </Fragment>
+                    );
+                  })}
+                  {nextPageToken && (
+                    <button className="load-more-btn" onClick={loadMore} disabled={loadingMore}>
+                      {loadingMore ? "Loading..." : "Load older emails"}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </section>
       )}
