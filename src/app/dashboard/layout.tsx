@@ -32,8 +32,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <ThemeToggle />
           <button className="sidebar-icon" title="Settings">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M8.3 2h3.4l.5 2.2c.5.2.9.5 1.3.8l2.1-.7 1.7 2.9-1.7 1.5c.1.4.1.9 0 1.3l1.7 1.5-1.7 2.9-2.1-.7c-.4.3-.8.6-1.3.8L11.7 18H8.3l-.5-2.2c-.5-.2-.9-.5-1.3-.8l-2.1.7-1.7-2.9 1.7-1.5c-.1-.4-.1-.9 0-1.3l-1.7-1.5 1.7-2.9 2.1.7c.4-.3.8-.6 1.3-.8L8.3 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
               <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </button>
         </div>

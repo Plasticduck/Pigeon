@@ -17,8 +17,15 @@ interface Email {
 interface EmailDetail extends Email {
   to: string;
   body: string;
-  attachments: { name: string; size: string; mimeType: string }[];
+  attachments: { name: string; size: string; mimeType: string; attachmentId?: string }[];
   threadId?: string;
+  labelIds?: string[];
+}
+
+interface FileAttachment {
+  name: string;
+  mimeType: string;
+  data: string; // base64
 }
 
 /* ── Avatar helpers ────────────────────────────────── */
@@ -84,26 +91,26 @@ const PERSONAL_DOMAINS = new Set([
 ]);
 
 /**
- * Avatar priority: Google Workspace photo > BIMI (via logo.clearbit.com) > Gravatar > initials
- * For personal domains we skip BIMI and go straight to Gravatar.
+ * Avatar priority: Google favicon (business) > Gravatar > initials
+ * Google S2 favicons work reliably for any domain.
  */
 function SenderAvatar({ name, email, className, style }: {
   name: string; email: string; className?: string; style?: React.CSSProperties;
 }) {
-  const [stage, setStage] = useState<"bimi"|"gravatar"|"initials">("bimi");
+  const [stage, setStage] = useState<"favicon"|"gravatar"|"initials">("favicon");
   const domain = email.split("@")[1] ?? "";
   const isPersonal = PERSONAL_DOMAINS.has(domain);
   const gravatarUrl = `https://www.gravatar.com/avatar/${md5Hex(email)}?s=68&d=404`;
-  const bimiUrl = `https://logo.clearbit.com/${domain}`;
-  const effectiveStage = isPersonal ? (stage === "bimi" ? "gravatar" : stage) : stage;
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+  const effectiveStage = isPersonal ? (stage === "favicon" ? "gravatar" : stage) : stage;
 
-  if (effectiveStage === "bimi") {
+  if (effectiveStage === "favicon") {
     return (
       <img
-        src={bimiUrl}
+        src={faviconUrl}
         alt={name}
         className={className ?? "email-avatar"}
-        style={{ objectFit: "cover", ...(style ?? {}) }}
+        style={{ objectFit: "cover", borderRadius: "50%", ...(style ?? {}) }}
         onError={() => setStage("gravatar")}
       />
     );
@@ -145,6 +152,20 @@ function AttachmentIcon({ mimeType, name }: { mimeType: string; name: string }) 
   if (isAudio) return <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="1" width="11" height="15" rx="1.5" fill="#fef9c3" stroke="#ca8a04" strokeWidth="1.2"/><path d="M8 7v6M10 5v10M12 7v6" stroke="#ca8a04" strokeWidth="1.2" strokeLinecap="round"/></svg>;
   if (isZip) return <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="1" width="11" height="15" rx="1.5" fill="#f3f4f6" stroke="#6b7280" strokeWidth="1.2"/><path d="M9 1v15M11 1v15" stroke="#6b7280" strokeWidth="1" strokeDasharray="2 2"/></svg>;
   return <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="1" width="11" height="15" rx="1.5" fill="#f3f4f6" stroke="#9ca3af" strokeWidth="1.2"/><path d="M11 1v4h3" stroke="#9ca3af" strokeWidth="1.2" strokeLinecap="round"/><path d="M6 10h5M6 12h3" stroke="#9ca3af" strokeWidth="1" strokeLinecap="round"/></svg>;
+}
+
+/* ── File picker helper ───────────────────────────── */
+function readFileAsBase64(file: File): Promise<FileAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1];
+      resolve({ name: file.name, mimeType: file.type || "application/octet-stream", data: base64 });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 /* ── Search bar ────────────────────────────────────── */
@@ -206,6 +227,15 @@ function ComposeModal({ from, onClose, onSent }: { from: string; onClose: () => 
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [files, setFiles] = useState<FileAttachment[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files) return;
+    const newFiles = await Promise.all(Array.from(e.target.files).map(readFileAsBase64));
+    setFiles(prev => [...prev, ...newFiles]);
+    e.target.value = "";
+  }
 
   async function handleSend() {
     if (!to || !subject || !body) { setError("Fill in all fields"); return; }
@@ -215,7 +245,7 @@ function ComposeModal({ from, onClose, onSent }: { from: string; onClose: () => 
       const res = await fetch("/api/gmail/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, subject, body }),
+        body: JSON.stringify({ to, subject, body, attachments: files.length > 0 ? files : undefined }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error?.error?.message ?? "Send failed"); }
       onSent();
@@ -249,11 +279,28 @@ function ComposeModal({ from, onClose, onSent }: { from: string; onClose: () => 
           </div>
         </div>
         <textarea className="compose-body" value={body} onChange={e => setBody(e.target.value)} placeholder="Write your email..." rows={10} />
+        {files.length > 0 && (
+          <div className="compose-attachments">
+            {files.map((f, i) => (
+              <div key={i} className="compose-attachment-chip">
+                <span>{f.name}</span>
+                <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} title="Remove">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {error && <div className="compose-error">{error}</div>}
         <div className="compose-footer">
           <button className="compose-send-btn" onClick={handleSend} disabled={sending}>
             {sending ? "Sending..." : "Send"}
           </button>
+          <button className="compose-attach-btn" onClick={() => fileRef.current?.click()} title="Attach files">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5V4a4 4 0 018 0v7a2.5 2.5 0 01-5 0V5a1 1 0 012 0v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          <input ref={fileRef} type="file" multiple hidden onChange={handleFiles} />
+          <div style={{ flex: 1 }} />
           <button className="compose-discard" onClick={onClose}>Discard</button>
         </div>
       </div>
@@ -266,12 +313,10 @@ const MAIL_LABELS = [
   { id: "INBOX", label: "Inbox" },
   { id: "SENT", label: "Sent" },
   { id: "DRAFT", label: "Drafts" },
+  { id: "STARRED", label: "Starred" },
   { id: "SPAM", label: "Spam" },
   { id: "TRASH", label: "Trash" },
 ];
-
-const DIGEST_CACHE_KEY = "pigeon_daily_digest";
-const DIGEST_TTL = 3 * 60 * 60 * 1000; // 3 hours
 
 /* ── Main Component ────────────────────────────────── */
 export default function DashboardPage() {
@@ -288,10 +333,14 @@ export default function DashboardPage() {
   const [smartLabels, setSmartLabels] = useState<string[]>([]);
   const [replyText, setReplyText] = useState("");
   const [replySending, setReplySending] = useState(false);
+  const [replyFiles, setReplyFiles] = useState<FileAttachment[]>([]);
   const [showCompose, setShowCompose] = useState(false);
-  const [dailyDigest, setDailyDigest] = useState<string | null>(null);
-  const [digestLoading, setDigestLoading] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [starred, setStarred] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const replyFileRef = useRef<HTMLInputElement>(null);
 
   /* Fetch inbox */
   useEffect(() => {
@@ -307,40 +356,14 @@ export default function DashboardPage() {
         setEmails(list);
         setNextPageToken(data.nextPageToken ?? null);
         if (list.length > 0) setSelectedId(list[0].id);
-        /* Smart labels — once */
         if (activeLabel === "INBOX" && list.length > 0 && smartLabels.length === 0) {
           fetch("/api/ai/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ emails: list }) })
             .then(r => r.json()).then(d => { if (d.labels?.length) setSmartLabels(d.labels); }).catch(() => {});
-        }
-        /* Daily digest — cached for 3 hours */
-        if (activeLabel === "INBOX" && list.length > 0) {
-          tryLoadDigest(list);
         }
       })
       .catch(() => setEmails([]))
       .finally(() => setLoadingList(false));
   }, [activeLabel, search]);
-
-  function tryLoadDigest(list: Email[]) {
-    try {
-      const cached = localStorage.getItem(DIGEST_CACHE_KEY);
-      if (cached) {
-        const { digest, ts } = JSON.parse(cached);
-        if (Date.now() - ts < DIGEST_TTL) { setDailyDigest(digest); return; }
-      }
-    } catch {}
-    setDigestLoading(true);
-    fetch("/api/ai/summarize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ emails: list }) })
-      .then(r => r.json())
-      .then(d => {
-        if (d.digest) {
-          setDailyDigest(d.digest);
-          localStorage.setItem(DIGEST_CACHE_KEY, JSON.stringify({ digest: d.digest, ts: Date.now() }));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setDigestLoading(false));
-  }
 
   /* Pagination */
   function loadMore() {
@@ -359,8 +382,12 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
     setLoadingDetail(true);
+    setAiSummary(null);
     fetch("/api/gmail/message/" + selectedId)
-      .then(r => r.json()).then(data => setDetail(data))
+      .then(r => r.json()).then(data => {
+        setDetail(data);
+        setStarred(data.labelIds?.includes("STARRED") ?? false);
+      })
       .catch(() => setDetail(null))
       .finally(() => setLoadingDetail(false));
   }, [selectedId]);
@@ -373,6 +400,53 @@ export default function DashboardPage() {
         iframe.style.height = iframe.contentWindow.document.documentElement.scrollHeight + "px";
       }
     } catch {}
+  }
+
+  /* Gmail actions */
+  async function modifyEmail(action: string) {
+    if (!detail) return;
+    try {
+      await fetch("/api/gmail/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: detail.id, action }),
+      });
+      if (action === "trash" || action === "archive") {
+        setEmails(prev => prev.filter(e => e.id !== detail.id));
+        setSelectedId(null);
+        setDetail(null);
+      }
+      if (action === "star") setStarred(true);
+      if (action === "unstar") setStarred(false);
+    } catch {}
+  }
+
+  /* AI Summarize */
+  async function handleSummarize() {
+    if (!detail || summaryLoading) return;
+    setSummaryLoading(true);
+    try {
+      const res = await fetch("/api/ai/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: detail.subject, body: detail.body }),
+      });
+      const data = await res.json();
+      if (data.summary) setAiSummary(data.summary);
+    } catch {}
+    setSummaryLoading(false);
+  }
+
+  /* Download attachment */
+  function downloadAttachment(att: EmailDetail["attachments"][0]) {
+    if (!detail || !att.attachmentId) return;
+    const params = new URLSearchParams({
+      messageId: detail.id,
+      attachmentId: att.attachmentId,
+      filename: att.name,
+      mimeType: att.mimeType,
+    });
+    window.open("/api/gmail/attachment?" + params, "_blank");
   }
 
   /* Reply */
@@ -388,11 +462,20 @@ export default function DashboardPage() {
           subject: detail.subject.startsWith("Re:") ? detail.subject : "Re: " + detail.subject,
           body: replyText,
           threadId: detail.threadId,
+          attachments: replyFiles.length > 0 ? replyFiles : undefined,
         }),
       });
       setReplyText("");
+      setReplyFiles([]);
     } catch {}
     setReplySending(false);
+  }
+
+  async function handleReplyFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files) return;
+    const newFiles = await Promise.all(Array.from(e.target.files).map(readFileAsBase64));
+    setReplyFiles(prev => [...prev, ...newFiles]);
+    e.target.value = "";
   }
 
   const firstName = session?.user?.name?.split(" ")[0] ?? "there";
@@ -401,123 +484,108 @@ export default function DashboardPage() {
     : null;
 
   return (
-    <div className="dashboard-main">
+    <div className={"dashboard-main" + (fullScreen ? " fullscreen-mode" : "")}>
       {showCompose && <ComposeModal from={session?.user?.email ?? ""} onClose={() => setShowCompose(false)} onSent={() => { setActiveLabel("SENT"); }} />}
 
       {/* Nav Pane */}
-      <aside className="nav-pane">
-        <div className="profile-section">
-          {session?.user?.image ? (
-            <img src={session.user.image} alt="" className="profile-avatar-circle" style={{ objectFit: "cover" }} referrerPolicy="no-referrer" />
-          ) : (
-            <div className="profile-avatar-circle" style={{ background: avatarColor(session?.user?.name ?? "U") }}>
-              {getInitials(session?.user?.name ?? "U")}
+      {!fullScreen && (
+        <aside className="nav-pane">
+          <div className="profile-section">
+            {session?.user?.image ? (
+              <img src={session.user.image} alt="" className="profile-avatar-circle" style={{ objectFit: "cover" }} referrerPolicy="no-referrer" />
+            ) : (
+              <div className="profile-avatar-circle" style={{ background: avatarColor(session?.user?.name ?? "U") }}>
+                {getInitials(session?.user?.name ?? "U")}
+              </div>
+            )}
+            <div className="profile-info">
+              <span className="profile-name">{session?.user?.name}</span>
+              <span className="profile-email">{session?.user?.email}</span>
             </div>
-          )}
-          <div className="profile-info">
-            <span className="profile-name">{session?.user?.name}</span>
-            <span className="profile-email">{session?.user?.email}</span>
           </div>
-        </div>
 
-        <button className="btn-compose" onClick={() => setShowCompose(true)}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.5 2.5L10 6M2 14l1.5-4.5L12 1l3 3-9.5 8.5L2 14z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          Compose
-        </button>
+          <button className="btn-compose" onClick={() => setShowCompose(true)}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.5 2.5L10 6M2 14l1.5-4.5L12 1l3 3-9.5 8.5L2 14z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Compose
+          </button>
 
-        <div className="nav-section">
-          <div className="nav-title">Mail</div>
-          <div className="nav-list">
-            {MAIL_LABELS.map(item => (
-              <button key={item.id}
-                className={"nav-item" + (activeLabel === item.id && !search ? " active" : "")}
-                onClick={() => { setActiveLabel(item.id); setSearch(""); setSelectedId(null); setDetail(null); }}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {smartLabels.length > 0 && (
           <div className="nav-section">
-            <div className="nav-title">
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginRight: "4px" }}><path d="M5 1l.9 2.7H9L6.5 5.4l.9 2.7L5 6.4l-2.4 1.7.9-2.7L1 3.7h3.1L5 1z" fill="currentColor"/></svg>
-              Smart Labels
-            </div>
+            <div className="nav-title">Mail</div>
             <div className="nav-list">
-              {smartLabels.map(label => (
-                <button key={label} className="nav-item" onClick={() => { setActiveLabel("INBOX"); setSearch(label); }}>
-                  {label}
+              {MAIL_LABELS.map(item => (
+                <button key={item.id}
+                  className={"nav-item" + (activeLabel === item.id && !search ? " active" : "")}
+                  onClick={() => { setActiveLabel(item.id); setSearch(""); setSelectedId(null); setDetail(null); }}>
+                  {item.label}
                 </button>
               ))}
             </div>
           </div>
-        )}
 
-        <div className="nav-section">
-          <div className="nav-title">Other</div>
-          <div className="nav-list">
-            <button className="nav-item">Email Settings</button>
-            <button className="nav-item">Feedback</button>
-          </div>
-        </div>
-      </aside>
+          {smartLabels.length > 0 && (
+            <div className="nav-section">
+              <div className="nav-title">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginRight: "4px" }}><path d="M5 1l.9 2.7H9L6.5 5.4l.9 2.7L5 6.4l-2.4 1.7.9-2.7L1 3.7h3.1L5 1z" fill="currentColor"/></svg>
+                Smart Labels
+              </div>
+              <div className="nav-list">
+                {smartLabels.map(label => (
+                  <button key={label} className="nav-item" onClick={() => { setActiveLabel("INBOX"); setSearch(label); }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </aside>
+      )}
 
       {/* List Pane */}
-      <section className="list-pane">
-        <div className="list-header">
-          <div className="list-title">
-            {activeLabel === "INBOX" ? "Good Morning, " + firstName : MAIL_LABELS.find(l => l.id === activeLabel)?.label}
-          </div>
-          <SearchBar onSearch={setSearch} />
-        </div>
-
-        {/* Daily Digest */}
-        {activeLabel === "INBOX" && (dailyDigest || digestLoading) && (
-          <div className="daily-digest">
-            <div className="daily-digest-label">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1l.9 2.7H9.6L7.2 5.4l.9 2.7L6 6.4l-2.1 1.7.9-2.7L2.4 3.7H5.1L6 1z" fill="#7c3aed"/></svg>
-              Daily Digest
+      {!fullScreen && (
+        <section className="list-pane">
+          <div className="list-header">
+            <div className="list-title">
+              {activeLabel === "INBOX" ? "Good Morning, " + firstName : MAIL_LABELS.find(l => l.id === activeLabel)?.label}
             </div>
-            <p className="daily-digest-text">{digestLoading ? "Generating digest..." : dailyDigest}</p>
+            <SearchBar onSearch={setSearch} />
           </div>
-        )}
 
-        <div className="emails-container">
-          {loadingList ? (
-            <div className="state-msg">Loading...</div>
-          ) : emails.length === 0 ? (
-            <div className="state-msg">No emails found.</div>
-          ) : (
-            <>
-              {emails.map(email => (
-                <div key={email.id}
-                  className={"email-card" + (selectedId === email.id ? " selected" : "") + (email.isUnread ? " unread" : "")}
-                  onClick={() => setSelectedId(email.id)}>
-                  <SenderAvatar name={email.senderName} email={email.senderEmail} />
-                  <div className="email-card-body">
-                    <div className="email-row-top">
-                      <span className="sender-name">{email.senderName}</span>
-                      <span className="email-date">{email.date}</span>
+          <div className="emails-container">
+            {loadingList ? (
+              <div className="state-msg">Loading...</div>
+            ) : emails.length === 0 ? (
+              <div className="state-msg">No emails found.</div>
+            ) : (
+              <>
+                {emails.map(email => (
+                  <div key={email.id}
+                    className={"email-card" + (selectedId === email.id ? " selected" : "") + (email.isUnread ? " unread" : "")}
+                    onClick={() => setSelectedId(email.id)}>
+                    <SenderAvatar name={email.senderName} email={email.senderEmail} />
+                    <div className="email-card-body">
+                      <div className="email-row-top">
+                        <span className="sender-name">{email.senderName}</span>
+                        <span className="email-date">{email.date}</span>
+                      </div>
+                      <div className="email-subject">{email.subject}</div>
+                      <div className="email-preview">{email.snippet}</div>
                     </div>
-                    <div className="email-subject">{email.subject}</div>
-                    <div className="email-preview">{email.snippet}</div>
+                    {email.isUnread && <div className="unread-dot" />}
                   </div>
-                  {email.isUnread && <div className="unread-dot" />}
-                </div>
-              ))}
-              {nextPageToken && (
-                <button className="load-more-btn" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? "Loading..." : "Load older emails"}
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </section>
+                ))}
+                {nextPageToken && (
+                  <button className="load-more-btn" onClick={loadMore} disabled={loadingMore}>
+                    {loadingMore ? "Loading..." : "Load older emails"}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Detail Pane */}
-      <section className="detail-pane">
+      <section className={"detail-pane" + (fullScreen ? " detail-fullscreen" : "")}>
         {!selectedId || (!detail && !loadingDetail) ? (
           <div className="detail-empty">Select an email to read</div>
         ) : loadingDetail ? (
@@ -526,12 +594,46 @@ export default function DashboardPage() {
           <>
             <div className="detail-header">
               <div className="detail-actions">
-                <button className="icon-btn" title="Back"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button>
-                <button className="icon-btn" title="Delete"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5M3 4l1 9.5a.5.5 0 00.5.5h7a.5.5 0 00.5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button>
-                <button className="icon-btn" title="Archive"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M1.5 2h13l-1 3H2.5L1.5 2zM2.5 5v9.5a.5.5 0 00.5.5h10a.5.5 0 00.5-.5V5M6.5 8.5h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button>
+                {fullScreen ? (
+                  <button className="icon-btn" title="Exit full screen" onClick={() => setFullScreen(false)}>
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                ) : (
+                  <button className="icon-btn" title="Back" onClick={() => { setSelectedId(null); setDetail(null); }}>
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                )}
+                <button className="icon-btn" title="Delete" onClick={() => modifyEmail("trash")}>
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5 4V2.5a.5.5 0 01.5-.5h5a.5.5 0 01.5.5V4M6 7v5M10 7v5M3 4l1 9.5a.5.5 0 00.5.5h7a.5.5 0 00.5-.5L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <button className="icon-btn" title="Archive" onClick={() => modifyEmail("archive")}>
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M1.5 2h13l-1 3H2.5L1.5 2zM2.5 5v9.5a.5.5 0 00.5.5h10a.5.5 0 00.5-.5V5M6.5 8.5h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <button className={"icon-btn" + (starred ? " starred" : "")} title={starred ? "Unstar" : "Star"} onClick={() => modifyEmail(starred ? "unstar" : "star")}>
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill={starred ? "#facc15" : "none"}><path d="M8 1.5l1.8 3.7 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6L8 1.5z" stroke={starred ? "#facc15" : "currentColor"} strokeWidth="1.2" strokeLinejoin="round"/></svg>
+                </button>
+                <button className="icon-btn" title={fullScreen ? "Exit full screen" : "Full screen"} onClick={() => setFullScreen(!fullScreen)}>
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">{fullScreen ? <path d="M6 2v4H2M10 14v-4h4M6 14v-4H2M10 2v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/> : <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>}</svg>
+                </button>
               </div>
-              <span className="detail-date-header">{detail.date}</span>
+              <div className="detail-header-right">
+                <button className="summarize-btn" onClick={handleSummarize} disabled={summaryLoading}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1l1.5 4.5H14l-3.5 2.5 1.5 4.5L8 10l-4 2.5 1.5-4.5L2 5.5h4.5L8 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
+                  {summaryLoading ? "Summarizing..." : "Summarize"}
+                </button>
+                <span className="detail-date-header">{detail.date}</span>
+              </div>
             </div>
+
+            {aiSummary && (
+              <div className="ai-summary-block">
+                <div className="ai-summary-label">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1l.9 2.7H9.6L7.2 5.4l.9 2.7L6 6.4l-2.1 1.7.9-2.7L2.4 3.7H5.1L6 1z" fill="#7c3aed"/></svg>
+                  AI Summary
+                </div>
+                <p className="ai-summary-text">{aiSummary}</p>
+              </div>
+            )}
 
             <div className="detail-content">
               <h2 className="detail-subject">{detail.subject}</h2>
@@ -552,10 +654,10 @@ export default function DashboardPage() {
 
               {detail.attachments.length > 0 && (
                 <div className="attachments-section">
-                  <div className="attachments-title">Attachments</div>
+                  <div className="attachments-title">Attachments ({detail.attachments.length})</div>
                   <div className="attachments-grid">
                     {detail.attachments.map((att, i) => (
-                      <div key={i} className="attachment-card">
+                      <div key={i} className="attachment-card" onClick={() => downloadAttachment(att)} style={{ cursor: att.attachmentId ? "pointer" : "default" }}>
                         <div className="attachment-icon-wrap"><AttachmentIcon mimeType={att.mimeType} name={att.name} /></div>
                         <div className="attachment-info">
                           <div className="attachment-name">{att.name}</div>
@@ -570,11 +672,25 @@ export default function DashboardPage() {
             </div>
 
             <div className="reply-box">
+              {replyFiles.length > 0 && (
+                <div className="reply-attachments">
+                  {replyFiles.map((f, i) => (
+                    <div key={i} className="compose-attachment-chip">
+                      <span>{f.name}</span>
+                      <button onClick={() => setReplyFiles(prev => prev.filter((_, j) => j !== i))} title="Remove">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <textarea className="reply-input" placeholder="Reply to email..." value={replyText} onChange={e => setReplyText(e.target.value)} rows={2} />
               <div className="reply-footer">
-                <button className="reply-attach" title="Attach file"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5V4a4 4 0 018 0v7a2.5 2.5 0 01-5 0V5a1 1 0 012 0v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button>
+                <button className="reply-attach" title="Attach file" onClick={() => replyFileRef.current?.click()}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5V4a4 4 0 018 0v7a2.5 2.5 0 01-5 0V5a1 1 0 012 0v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <input ref={replyFileRef} type="file" multiple hidden onChange={handleReplyFiles} />
                 <div className="reply-right-actions">
-                  <button className="reply-voice" title="Voice"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8h1.5M4 5v6M6.5 3.5v9M9 5v6M11.5 6.5v3M14.5 8H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg></button>
                   <button className="reply-send" title="Send" onClick={handleReply} disabled={replySending}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M14 2L7 9M14 2L9.5 14 7 9 2 6.5 14 2z" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>

@@ -1,14 +1,29 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 
-function buildRawEmail(to: string, subject: string, body: string, from: string, inReplyTo?: string, threadId?: string): string {
+interface Attachment {
+  name: string;
+  mimeType: string;
+  data: string; // base64
+}
+
+function buildRawEmail(
+  to: string,
+  subject: string,
+  body: string,
+  from: string,
+  attachments?: Attachment[],
+  inReplyTo?: string,
+): string {
   const boundary = "----=_Part_" + Date.now();
+  const hasAttachments = attachments && attachments.length > 0;
+
   const headers = [
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${subject}`,
     `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: multipart/${hasAttachments ? "mixed" : "alternative"}; boundary="${boundary}"`,
   ];
   if (inReplyTo) {
     headers.push(`In-Reply-To: ${inReplyTo}`);
@@ -16,25 +31,46 @@ function buildRawEmail(to: string, subject: string, body: string, from: string, 
   }
 
   const plainBody = body.replace(/<[^>]+>/g, "");
+  const parts: string[] = [headers.join("\r\n"), ""];
 
-  const raw = [
-    headers.join("\r\n"),
-    "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "",
-    plainBody,
-    `--${boundary}`,
-    "Content-Type: text/html; charset=UTF-8",
-    "",
-    body,
-    `--${boundary}--`,
-  ].join("\r\n");
+  if (hasAttachments) {
+    const altBoundary = "----=_Alt_" + Date.now();
+    parts.push(`--${boundary}`);
+    parts.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+    parts.push("");
+    parts.push(`--${altBoundary}`);
+    parts.push("Content-Type: text/plain; charset=UTF-8");
+    parts.push("");
+    parts.push(plainBody);
+    parts.push(`--${altBoundary}`);
+    parts.push("Content-Type: text/html; charset=UTF-8");
+    parts.push("");
+    parts.push(body);
+    parts.push(`--${altBoundary}--`);
 
-  return btoa(unescape(encodeURIComponent(raw)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+    for (const att of attachments!) {
+      parts.push(`--${boundary}`);
+      parts.push(`Content-Type: ${att.mimeType}; name="${att.name}"`);
+      parts.push("Content-Transfer-Encoding: base64");
+      parts.push(`Content-Disposition: attachment; filename="${att.name}"`);
+      parts.push("");
+      parts.push(att.data);
+    }
+    parts.push(`--${boundary}--`);
+  } else {
+    parts.push(`--${boundary}`);
+    parts.push("Content-Type: text/plain; charset=UTF-8");
+    parts.push("");
+    parts.push(plainBody);
+    parts.push(`--${boundary}`);
+    parts.push("Content-Type: text/html; charset=UTF-8");
+    parts.push("");
+    parts.push(body);
+    parts.push(`--${boundary}--`);
+  }
+
+  const raw = parts.join("\r\n");
+  return Buffer.from(raw).toString("base64url");
 }
 
 export async function POST(req: Request) {
@@ -43,7 +79,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { to, subject, body, threadId, inReplyTo } = await req.json();
+  const { to, subject, body, threadId, inReplyTo, attachments } = await req.json();
 
   if (!to || !subject || !body) {
     return Response.json({ error: "Missing to, subject, or body" }, { status: 400 });
@@ -54,8 +90,8 @@ export async function POST(req: Request) {
     subject,
     body,
     session.user.email,
+    attachments,
     inReplyTo,
-    threadId,
   );
 
   const payload: Record<string, string> = { raw };
