@@ -1048,22 +1048,23 @@
 }
 
 .detail-fullscreen .detail-content {
-  max-width: 860px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 1.5rem 2.5rem 1rem;
+  padding: 1.5rem 3rem 1rem;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .detail-fullscreen .reply-box {
-  max-width: 860px;
+  max-width: 1200px;
   margin: 0 auto 1.125rem;
-  width: calc(100% - 4rem);
+  width: calc(100% - 6rem);
 }
 
 .detail-fullscreen .ai-summary-block {
-  max-width: 860px;
+  max-width: 1200px;
   margin: 0.75rem auto 0;
-  width: calc(100% - 4rem);
+  width: calc(100% - 6rem);
 }
 
 /* Priority Inbox */

@@ -90,6 +90,12 @@ const PERSONAL_DOMAINS = new Set([
   "me.com","live.com","aol.com","protonmail.com","msn.com",
 ]);
 
+/** Strip subdomains so Clearbit resolves: announcements.soundcloud.com → soundcloud.com */
+function getRootDomain(d: string): string {
+  const p = d.split(".");
+  return p.length > 2 ? p.slice(-2).join(".") : d;
+}
+
 /**
  * Avatar priority: Clearbit logo (business) > Gravatar > colored initials
  * Clearbit properly returns 404 when no logo exists, so onError fires correctly.
@@ -99,7 +105,8 @@ function SenderAvatar({ name, email, className, style }: {
   name: string; email: string; className?: string; style?: React.CSSProperties;
 }) {
   const [stage, setStage] = useState<"logo"|"gravatar"|"initials">("logo");
-  const domain = email.split("@")[1] ?? "";
+  const rawDomain = email.split("@")[1] ?? "";
+  const domain = getRootDomain(rawDomain);
   const isPersonal = PERSONAL_DOMAINS.has(domain);
   const logoUrl = `https://logo.clearbit.com/${domain}`;
   const gravatarUrl = `https://www.gravatar.com/avatar/${md5Hex(email)}?s=68&d=404`;
