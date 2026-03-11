@@ -1,4 +1,5 @@
 import "./dashboard.css";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -28,6 +29,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
         </div>
         <div className="sidebar-bottom">
+          <ThemeToggle />
           <button className="sidebar-icon" title="Settings">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.5"/>

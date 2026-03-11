@@ -36,6 +36,32 @@ function initials(name: string): string {
   return (p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
 
+const PERSONAL_DOMAINS = new Set(["gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com","me.com","live.com","aol.com","protonmail.com","msn.com"]);
+
+function SenderAvatar({ name, email, className, style }: { name: string; email: string; className?: string; style?: React.CSSProperties }) {
+  const [failed, setFailed] = useState(false);
+  const domain = email.split("@")[1] ?? "";
+  const useLogoApi = domain && !PERSONAL_DOMAINS.has(domain) && !failed;
+
+  if (useLogoApi) {
+    return (
+      <img
+        src={`https://logo.clearbit.com/${domain}`}
+        alt={name}
+        className={className ?? "email-avatar"}
+        style={{ objectFit: "cover", ...(style ?? {}) }}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <div className={className ?? "email-avatar"} style={{ background: avatarColor(name), ...(style ?? {}) }}>
+      {initials(name)}
+    </div>
+  );
+}
+
 function AttachmentIcon({ mimeType, name }: { mimeType: string; name: string }) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   const isPdf = mimeType.includes("pdf") || ext === "pdf";
@@ -101,6 +127,77 @@ function AttachmentIcon({ mimeType, name }: { mimeType: string; name: string }) 
   );
 }
 
+const SEARCH_FILTERS = [
+  { label: "From", chip: "from:" },
+  { label: "To", chip: "to:" },
+  { label: "Subject", chip: "subject:" },
+  { label: "Has attachment", chip: "has:attachment " },
+  { label: "Unread", chip: "is:unread " },
+  { label: "Starred", chip: "is:starred " },
+];
+
+function SearchBar({ onSearch }: { onSearch: (q: string) => void }) {
+  const [value, setValue] = useState("");
+  const [focused, setFocused] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleChange(val: string) {
+    setValue(val);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => onSearch(val), 500);
+  }
+
+  function applyFilter(chip: string) {
+    const base = value.trimEnd();
+    const next = base ? base + " " + chip : chip;
+    setValue(next);
+    onSearch(next);
+  }
+
+  function clear() {
+    setValue("");
+    onSearch("");
+  }
+
+  return (
+    <div className="search-container">
+      <div className="search-bar-wrapper">
+        <svg className="search-icon" viewBox="0 0 20 20" fill="none">
+          <path d="M13 13L17 17M8.5 15C5.46 15 3 12.54 3 9.5S5.46 4 8.5 4 14 6.46 14 9.5 11.54 15 8.5 15z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+        <input
+          className="search-bar"
+          type="text"
+          placeholder="Search emails..."
+          value={value}
+          onChange={e => handleChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 150)}
+        />
+        {value && (
+          <button className="search-clear" onClick={clear} title="Clear">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+        )}
+      </div>
+      {focused && (
+        <div className="search-dropdown">
+          <div className="search-dropdown-label">Quick filters</div>
+          <div className="search-filters-row">
+            {SEARCH_FILTERS.map(f => (
+              <button key={f.chip} className="search-filter-chip" onMouseDown={() => applyFilter(f.chip)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MAIL_LABELS = [
   { id: "INBOX", label: "Inbox" },
   { id: "SENT", label: "Sent" },
@@ -112,23 +209,25 @@ const MAIL_LABELS = [
 export default function DashboardPage() {
   const { data: session } = useSession();
   const [emails, setEmails] = useState<Email[]>([]);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<EmailDetail | null>(null);
   const [search, setSearch] = useState("");
   const [activeLabel, setActiveLabel] = useState("INBOX");
   const [loadingList, setLoadingList] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [smartLabels, setSmartLabels] = useState<string[]>([]);
   const [replyText, setReplyText] = useState("");
   const summaryCache = useRef<Map<string, string>>(new Map());
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Fetch email list
   useEffect(() => {
     setLoadingList(true);
+    setEmails([]);
+    setNextPageToken(null);
     const params = new URLSearchParams({ label: activeLabel });
     if (search) params.set("q", search);
     fetch("/api/gmail/messages?" + params)
@@ -136,8 +235,8 @@ export default function DashboardPage() {
       .then(data => {
         const list: Email[] = data.emails ?? [];
         setEmails(list);
+        setNextPageToken(data.nextPageToken ?? null);
         if (list.length > 0) setSelectedId(list[0].id);
-        // Fetch AI labels once for inbox
         if (activeLabel === "INBOX" && list.length > 0 && smartLabels.length === 0) {
           fetch("/api/ai/labels", {
             method: "POST",
@@ -153,7 +252,21 @@ export default function DashboardPage() {
       .finally(() => setLoadingList(false));
   }, [activeLabel, search]);
 
-  // Fetch email detail
+  function loadMore() {
+    if (!nextPageToken || loadingMore) return;
+    setLoadingMore(true);
+    const params = new URLSearchParams({ label: activeLabel, pageToken: nextPageToken });
+    if (search) params.set("q", search);
+    fetch("/api/gmail/messages?" + params)
+      .then(r => r.json())
+      .then(data => {
+        setEmails(prev => [...prev, ...(data.emails ?? [])]);
+        setNextPageToken(data.nextPageToken ?? null);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false));
+  }
+
   useEffect(() => {
     if (!selectedId) { setDetail(null); setAiSummary(null); return; }
     setLoadingDetail(true);
@@ -162,7 +275,6 @@ export default function DashboardPage() {
       .then(r => r.json())
       .then(data => {
         setDetail(data);
-        // Fetch AI summary (cached)
         if (summaryCache.current.has(selectedId)) {
           setAiSummary(summaryCache.current.get(selectedId)!);
         } else {
@@ -187,11 +299,6 @@ export default function DashboardPage() {
       .finally(() => setLoadingDetail(false));
   }, [selectedId]);
 
-  function handleSearch(val: string) {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => setSearch(val), 500);
-  }
-
   function handleIframeLoad() {
     try {
       const iframe = iframeRef.current;
@@ -210,12 +317,15 @@ export default function DashboardPage() {
 
   return (
     <div className="dashboard-main">
-      {/* Nav Pane */}
       <aside className="nav-pane">
         <div className="profile-section">
-          <div className="profile-avatar-circle" style={{ background: avatarColor(session?.user?.name ?? "U") }}>
-            {initials(session?.user?.name ?? "U")}
-          </div>
+          {session?.user?.image ? (
+            <img src={session.user.image} alt="" className="profile-avatar-circle" style={{ objectFit: "cover" }} referrerPolicy="no-referrer" />
+          ) : (
+            <div className="profile-avatar-circle" style={{ background: avatarColor(session?.user?.name ?? "U") }}>
+              {initials(session?.user?.name ?? "U")}
+            </div>
+          )}
           <div className="profile-info">
             <span className="profile-name">{session?.user?.name}</span>
             <span className="profile-email">{session?.user?.email}</span>
@@ -235,8 +345,8 @@ export default function DashboardPage() {
             {MAIL_LABELS.map(item => (
               <button
                 key={item.id}
-                className={"nav-item" + (activeLabel === item.id ? " active" : "")}
-                onClick={() => { setActiveLabel(item.id); setSelectedId(null); setDetail(null); }}
+                className={"nav-item" + (activeLabel === item.id && !search ? " active" : "")}
+                onClick={() => { setActiveLabel(item.id); setSearch(""); setSelectedId(null); setDetail(null); }}
               >
                 {item.label}
               </button>
@@ -247,7 +357,7 @@ export default function DashboardPage() {
         {smartLabels.length > 0 && (
           <div className="nav-section">
             <div className="nav-title">
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{marginRight:"4px"}}>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginRight: "4px" }}>
                 <path d="M5 1l.9 2.7H9L6.5 5.4l.9 2.7L5 6.4l-2.4 1.7.9-2.7L1 3.7h3.1L5 1z" fill="currentColor"/>
               </svg>
               Smart Labels
@@ -275,18 +385,12 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      {/* Email List */}
       <section className="list-pane">
         <div className="list-header">
           <div className="list-title">
             {activeLabel === "INBOX" ? "Good Morning, " + firstName : MAIL_LABELS.find(l => l.id === activeLabel)?.label}
           </div>
-          <div className="search-bar-wrapper">
-            <svg className="search-icon" viewBox="0 0 20 20" fill="none">
-              <path d="M13 13L17 17M8.5 15C5.46 15 3 12.54 3 9.5S5.46 4 8.5 4 14 6.46 14 9.5 11.54 15 8.5 15z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-            <input className="search-bar" type="text" placeholder="Search emails..." onChange={e => handleSearch(e.target.value)} />
-          </div>
+          <SearchBar onSearch={setSearch} />
         </div>
 
         <div className="emails-container">
@@ -295,31 +399,35 @@ export default function DashboardPage() {
           ) : emails.length === 0 ? (
             <div className="state-msg">No emails found.</div>
           ) : (
-            emails.map(email => (
-              <div
-                key={email.id}
-                className={"email-card" + (selectedId === email.id ? " selected" : "") + (email.isUnread ? " unread" : "")}
-                onClick={() => setSelectedId(email.id)}
-              >
-                <div className="email-avatar" style={{ background: avatarColor(email.senderName) }}>
-                  {initials(email.senderName)}
-                </div>
-                <div className="email-card-body">
-                  <div className="email-row-top">
-                    <span className="sender-name">{email.senderName}</span>
-                    <span className="email-date">{email.date}</span>
+            <>
+              {emails.map(email => (
+                <div
+                  key={email.id}
+                  className={"email-card" + (selectedId === email.id ? " selected" : "") + (email.isUnread ? " unread" : "")}
+                  onClick={() => setSelectedId(email.id)}
+                >
+                  <SenderAvatar name={email.senderName} email={email.senderEmail} />
+                  <div className="email-card-body">
+                    <div className="email-row-top">
+                      <span className="sender-name">{email.senderName}</span>
+                      <span className="email-date">{email.date}</span>
+                    </div>
+                    <div className="email-subject">{email.subject}</div>
+                    <div className="email-preview">{email.snippet}</div>
                   </div>
-                  <div className="email-subject">{email.subject}</div>
-                  <div className="email-preview">{email.snippet}</div>
+                  {email.isUnread && <div className="unread-dot" />}
                 </div>
-                {email.isUnread && <div className="unread-dot" />}
-              </div>
-            ))
+              ))}
+              {nextPageToken && (
+                <button className="load-more-btn" onClick={loadMore} disabled={loadingMore}>
+                  {loadingMore ? "Loading..." : "Load older emails"}
+                </button>
+              )}
+            </>
           )}
         </div>
       </section>
 
-      {/* Detail Pane */}
       <section className="detail-pane">
         {!selectedId || (!detail && !loadingDetail) ? (
           <div className="detail-empty">Select an email to read</div>
@@ -352,9 +460,7 @@ export default function DashboardPage() {
               <h2 className="detail-subject">{detail.subject}</h2>
 
               <div className="detail-sender-info">
-                <div className="email-avatar" style={{ background: avatarColor(detail.senderName) }}>
-                  {initials(detail.senderName)}
-                </div>
+                <SenderAvatar name={detail.senderName} email={detail.senderEmail} />
                 <div className="detail-sender-text">
                   <span className="name">{detail.senderName}</span>
                   <span className="addr">{detail.senderEmail}</span>
@@ -414,7 +520,6 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Reply Box */}
             <div className="reply-box">
               <textarea
                 className="reply-input"

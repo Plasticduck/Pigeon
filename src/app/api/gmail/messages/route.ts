@@ -29,9 +29,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const label = searchParams.get("label") || "INBOX";
   const q = searchParams.get("q") || "";
+  const pageToken = searchParams.get("pageToken") || "";
 
   const query = new URLSearchParams({ maxResults: "25", labelIds: label });
   if (q) query.set("q", q);
+  if (pageToken) query.set("pageToken", pageToken);
 
   const listRes = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?${query}`,
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
   }
 
   const listData = await listRes.json();
-  if (!listData.messages?.length) return Response.json({ emails: [] });
+  if (!listData.messages?.length) return Response.json({ emails: [], nextPageToken: null });
 
   const emails = await Promise.all(
     listData.messages.map(async (msg: { id: string }) => {
@@ -71,5 +73,5 @@ export async function GET(req: NextRequest) {
     })
   );
 
-  return Response.json({ emails });
+  return Response.json({ emails, nextPageToken: listData.nextPageToken ?? null });
 }
